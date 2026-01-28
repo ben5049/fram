@@ -8,7 +8,7 @@
 #include "stdint.h"
 
 #include "fram.h"
-#include "logging.h"
+#include "log_tools.h"
 
 
 static fram_status_t FRAM_WriteEnable(fram_handle_t *dev);
