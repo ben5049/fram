@@ -11,54 +11,45 @@
 #include "log_tools.h"
 
 
-static fram_status_t FRAM_WriteEnable(fram_handle_t *dev);
-static fram_status_t FRAM_WriteDisable(fram_handle_t *dev);
-static fram_status_t FRAM_ReadSR(fram_handle_t *dev, uint8_t *sr);
-static fram_status_t FRAM_WriteSR(fram_handle_t *dev, uint8_t sr);
-
-static fram_status_t spi_transmit(fram_handle_t *dev, const uint8_t *data, uint16_t size);
-static fram_status_t spi_receive(fram_handle_t *dev, uint8_t *data, uint16_t size);
+#define FRAM_SPI_TRANSMIT(h, d, s)    ((h)->callbacks->callback_spi_transmit(d, s, (h)->callback_context))
+#define FRAM_SPI_RECEIVE(h, d, s)     ((h)->callbacks->callback_spi_receive(d, s, (h)->callback_context))
+#define FRAM_CS_PIN_WRITE(h, s)   ((h)->callbacks->callback_write_cs_pin((s)))
+#define FRAM_WP_PIN_WRITE(h, s)   ((h)->callbacks->callback_write_wp_pin((s)))
+#define FRAM_HOLD_PIN_WRITE(h, s) ((h)->callbacks->callback_write_hold_pin((s)))
 
 
-fram_status_t FRAM_Init(
-    fram_handle_t     *dev,
-    fram_variant_t     variant,
-    SPI_HandleTypeDef *hspi,
-    GPIO_TypeDef      *cs_port,
-    uint16_t           cs_pin,
-    GPIO_TypeDef      *hold_port,
-    uint16_t           hold_pin,
-    GPIO_TypeDef      *wp_port,
-    uint16_t           wp_pin) {
+/* Private function prototypes */
+static fram_status_t fram_write_enable(fram_handle_t *dev);
+static fram_status_t fram_write_disable(fram_handle_t *dev);
+static fram_status_t fram_read_sr(fram_handle_t *dev, uint8_t *sr);
+static fram_status_t fram_write_sr(fram_handle_t *dev, uint8_t sr);
+
+
+fram_status_t fram_init(fram_handle_t *dev, fram_variant_t variant, const fram_callbacks_t *callbacks, void *callback_context) {
 
     fram_status_t status = FRAM_OK;
 
-    dev->configured    = false;
-    dev->variant       = variant;
-    dev->block_protect = FRAM_PROTECT_ALL; /* Default is protect all blocks */
-    dev->hspi          = hspi;
-    dev->cs_port       = cs_port;
-    dev->cs_pin        = cs_pin;
-    dev->hold_port     = hold_port;
-    dev->hold_pin      = hold_pin;
-    dev->wp_port       = wp_port;
-    dev->wp_pin        = wp_pin;
+    dev->configured       = false;
+    dev->variant          = variant;
+    dev->callbacks        = callbacks;
+    dev->callback_context = callback_context;
+    dev->block_protect    = FRAM_PROTECT_ALL; /* Default is protect all blocks */
 
     /* Set pins to default state */
-    HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, SET);
-    HAL_GPIO_WritePin(dev->hold_port, dev->hold_pin, SET);
-    HAL_GPIO_WritePin(dev->wp_port, dev->wp_pin, RESET);
+    FRAM_CS_PIN_WRITE(dev, FRAM_PIN_SET);
+    FRAM_HOLD_PIN_WRITE(dev, FRAM_PIN_SET);
+    FRAM_WP_PIN_WRITE(dev, FRAM_PIN_RESET);
 
     /* Enable WP pin functionality */
-    status = FRAM_EnableWP(dev);
+    status = fram_enable_wp(dev);
     if (status != FRAM_OK) return status;
 
     /* Set the default protection status (all) */
-    status = FRAM_SetBlockProtection(dev, dev->block_protect);
+    status = fram_set_block_protection(dev, dev->block_protect);
     if (status != FRAM_OK) return status;
 
     /* Clear the write enable latch to be safe */
-    status = FRAM_WriteDisable(dev);
+    status = fram_write_disable(dev);
     if (status != FRAM_OK) return status;
 
     /* Update the device struct */
@@ -68,100 +59,83 @@ fram_status_t FRAM_Init(
 }
 
 
-static fram_status_t FRAM_WriteEnable(fram_handle_t *dev) {
+static fram_status_t fram_write_enable(fram_handle_t *dev) {
 
     fram_status_t status = FRAM_OK;
     uint8_t       opcode = FRAM_OPCODE_WREN;
 
-    HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, RESET);
-
-    status = spi_transmit(dev, &opcode, 1);
-    if (status != FRAM_OK) {
-        HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, SET);
-        return status;
-    }
-
-    HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, SET);
+    FRAM_CS_PIN_WRITE(dev, FRAM_PIN_RESET);
+    status = FRAM_SPI_TRANSMIT(dev, &opcode, 1);
+    FRAM_CS_PIN_WRITE(dev, FRAM_PIN_SET);
 
     return status;
 }
 
 
-static fram_status_t FRAM_WriteDisable(fram_handle_t *dev) {
+static fram_status_t fram_write_disable(fram_handle_t *dev) {
 
     fram_status_t status = FRAM_OK;
     uint8_t       opcode = FRAM_OPCODE_WRDI;
 
-    HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, RESET);
-
-    status = spi_transmit(dev, &opcode, 1);
-    if (status != FRAM_OK) {
-        HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, SET);
-        return status;
-    }
-
-    HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, SET);
+    FRAM_CS_PIN_WRITE(dev, FRAM_PIN_RESET);
+    status = FRAM_SPI_TRANSMIT(dev, &opcode, 1);
+    FRAM_CS_PIN_WRITE(dev, FRAM_PIN_SET);
 
     return status;
 }
 
 
-static fram_status_t FRAM_ReadSR(fram_handle_t *dev, uint8_t *sr) {
+static fram_status_t fram_read_sr(fram_handle_t *dev, uint8_t *sr) {
 
     fram_status_t status = FRAM_OK;
     uint8_t       opcode = FRAM_OPCODE_RDSR;
 
-    HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, RESET);
+    FRAM_CS_PIN_WRITE(dev, FRAM_PIN_RESET);
 
-    status = spi_transmit(dev, &opcode, 1);
-    if (status != FRAM_OK) {
-        HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, SET);
-        return status;
-    }
+    status = FRAM_SPI_TRANSMIT(dev, &opcode, 1);
+    if (status != FRAM_OK) goto end;
 
-    status = spi_receive(dev, sr, 1);
-    if (status != FRAM_OK) {
-        HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, SET);
-        return status;
-    }
+    status = FRAM_SPI_TRANSMIT(dev, sr, 1);
+    if (status != FRAM_OK) goto end;
 
-    HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, SET);
-
+end:
+    FRAM_CS_PIN_WRITE(dev, FRAM_PIN_SET);
     return status;
 }
 
 
-static fram_status_t FRAM_WriteSR(fram_handle_t *dev, uint8_t sr) {
+static fram_status_t fram_write_sr(fram_handle_t *dev, uint8_t sr) {
 
     fram_status_t status   = FRAM_OK;
     uint8_t       opcode   = FRAM_OPCODE_WRSR;
     uint8_t       reg_data = 0;
 
-    status = FRAM_WriteEnable(dev);
+    status = fram_write_enable(dev);
     if (status != FRAM_OK) return status;
 
-    HAL_GPIO_WritePin(dev->wp_port, dev->wp_pin, SET);
-    HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, RESET);
+    FRAM_WP_PIN_WRITE(dev, FRAM_PIN_SET);
+    FRAM_CS_PIN_WRITE(dev, FRAM_PIN_RESET);
 
-    status = spi_transmit(dev, &opcode, 1);
+    status = FRAM_SPI_TRANSMIT(dev, &opcode, 1);
     if (status != FRAM_OK) {
-        HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, SET);
-        HAL_GPIO_WritePin(dev->wp_port, dev->wp_pin, RESET);
+        FRAM_CS_PIN_WRITE(dev, FRAM_PIN_SET);
+        FRAM_WP_PIN_WRITE(dev, FRAM_PIN_RESET);
         return status;
     }
 
-    status = spi_transmit(dev, &sr, 1);
+    status = FRAM_SPI_TRANSMIT(dev, &sr, 1);
     if (status != FRAM_OK) {
-        HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, SET);
-        HAL_GPIO_WritePin(dev->wp_port, dev->wp_pin, RESET);
+        FRAM_CS_PIN_WRITE(dev, FRAM_PIN_SET);
+        FRAM_WP_PIN_WRITE(dev, FRAM_PIN_RESET);
         return status;
     }
 
-    HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, SET);
-    HAL_GPIO_WritePin(dev->wp_port, dev->wp_pin, RESET);
+
+    FRAM_CS_PIN_WRITE(dev, FRAM_PIN_SET);
+    FRAM_WP_PIN_WRITE(dev, FRAM_PIN_RESET);
 
     /* Read the status register */
-    status = FRAM_ReadSR(dev, &reg_data);
+    status = fram_read_sr(dev, &reg_data);
     if (status != FRAM_OK) return status;
 
     /* Check the write was successful */
@@ -175,13 +149,13 @@ static fram_status_t FRAM_WriteSR(fram_handle_t *dev, uint8_t sr) {
 }
 
 
-fram_status_t FRAM_EnableWP(fram_handle_t *dev) {
+fram_status_t fram_enable_wp(fram_handle_t *dev) {
 
     fram_status_t status = FRAM_OK;
     uint8_t       reg_data;
 
     /* Read the status register */
-    status = FRAM_ReadSR(dev, &reg_data);
+    status = fram_read_sr(dev, &reg_data);
     if (status != FRAM_OK) return status;
 
     /* Check and update the status register */
@@ -189,7 +163,7 @@ fram_status_t FRAM_EnableWP(fram_handle_t *dev) {
         reg_data |= FRAM_SR_WPEN;
 
         /* Write to the status register */
-        status = FRAM_WriteSR(dev, reg_data);
+        status = fram_write_sr(dev, reg_data);
         if (status != FRAM_OK) return status;
     }
 
@@ -197,13 +171,13 @@ fram_status_t FRAM_EnableWP(fram_handle_t *dev) {
 }
 
 
-fram_status_t FRAM_DisableWP(fram_handle_t *dev) {
+fram_status_t fram_disable_wp(fram_handle_t *dev) {
 
     fram_status_t status = FRAM_OK;
     uint8_t       reg_data;
 
     /* Read the status register */
-    status = FRAM_ReadSR(dev, &reg_data);
+    status = fram_read_sr(dev, &reg_data);
     if (status != FRAM_OK) return status;
 
     /* Check and update the status register */
@@ -211,7 +185,7 @@ fram_status_t FRAM_DisableWP(fram_handle_t *dev) {
         reg_data &= ~FRAM_SR_WPEN;
 
         /* Write to the status register */
-        status = FRAM_WriteSR(dev, reg_data);
+        status = fram_write_sr(dev, reg_data);
         if (status != FRAM_OK) return status;
     }
 
@@ -219,13 +193,13 @@ fram_status_t FRAM_DisableWP(fram_handle_t *dev) {
 }
 
 
-fram_status_t FRAM_SetBlockProtection(fram_handle_t *dev, fram_block_protect_t protect) {
+fram_status_t fram_set_block_protection(fram_handle_t *dev, fram_block_protect_t protect) {
 
     fram_status_t status = FRAM_OK;
     uint8_t       reg_data;
 
     /* Read the status register */
-    status = FRAM_ReadSR(dev, &reg_data);
+    status = fram_read_sr(dev, &reg_data);
     if (status != FRAM_OK) return status;
 
     /* Determine the new status register value */
@@ -258,7 +232,7 @@ fram_status_t FRAM_SetBlockProtection(fram_handle_t *dev, fram_block_protect_t p
     if (status != FRAM_OK) return status;
 
     /* Write the status register */
-    status = FRAM_WriteSR(dev, reg_data);
+    status = fram_write_sr(dev, reg_data);
     if (status != FRAM_OK) return status;
 
     /* Update the device struct */
@@ -268,136 +242,80 @@ fram_status_t FRAM_SetBlockProtection(fram_handle_t *dev, fram_block_protect_t p
 }
 
 
-fram_status_t FRAM_Write(fram_handle_t *dev, uint16_t addr, const uint8_t *data, uint16_t size) {
+fram_status_t fram_write(fram_handle_t *dev, uint16_t addr, const uint8_t *data, uint16_t size) {
 
     fram_status_t status = FRAM_OK;
     uint8_t       opcode = FRAM_OPCODE_WRITE;
 
-    status = FRAM_WriteEnable(dev);
+    status = fram_write_enable(dev);
     if (status != FRAM_OK) return status;
 
-    HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, RESET);
+    FRAM_CS_PIN_WRITE(dev, FRAM_PIN_RESET);
 
     /* Send the opcode */
-    status = spi_transmit(dev, &opcode, 1);
-    if (status != FRAM_OK) {
-        HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, SET);
-        return status;
-    }
+    status = FRAM_SPI_TRANSMIT(dev, &opcode, 1);
+    if (status != FRAM_OK) goto end;
 
     /* Send the address */
     addr   &= 0x1fff; /* 13-bit address */
-    status  = spi_transmit(dev, (uint8_t *) (&addr), 2);
-    if (status != FRAM_OK) {
-        HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, SET);
-        return status;
-    }
+    status  = FRAM_SPI_TRANSMIT(dev, (uint8_t *) (&addr), 2);
+    if (status != FRAM_OK) goto end;
 
     /* Send the data */
-    status = spi_transmit(dev, data, size);
-    if (status != FRAM_OK) {
-        HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, SET);
-        return status;
-    }
+    status = FRAM_SPI_TRANSMIT(dev, data, size);
 
-    HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, SET);
-
+end:
+    FRAM_CS_PIN_WRITE(dev, FRAM_PIN_SET);
     return status;
 }
 
 
-fram_status_t FRAM_Read(fram_handle_t *dev, uint16_t addr, uint8_t *data, uint16_t size) {
+fram_status_t fram_read(fram_handle_t *dev, uint16_t addr, uint8_t *data, uint16_t size) {
 
     fram_status_t status = FRAM_OK;
     uint8_t       opcode = FRAM_OPCODE_READ;
 
-    HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, RESET);
+    FRAM_CS_PIN_WRITE(dev, FRAM_PIN_RESET);
 
     /* Send the opcode */
-    status = spi_transmit(dev, &opcode, 1);
-    if (status != FRAM_OK) {
-        HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, SET);
-        return status;
-    }
+    status = FRAM_SPI_TRANSMIT(dev, &opcode, 1);
+    if (status != FRAM_OK) goto end;
 
     /* Send the address */
     addr   &= 0x1fff; /* 13-bit address */
-    status  = spi_transmit(dev, (uint8_t *) (&addr), 2);
-    if (status != FRAM_OK) {
-        HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, SET);
-        return status;
-    }
+    status  = FRAM_SPI_TRANSMIT(dev, (uint8_t *) (&addr), 2);
+    if (status != FRAM_OK) goto end;
 
     /* Read the data */
-    status = spi_receive(dev, data, size);
-    if (status != FRAM_OK) {
-        HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, SET);
-        return status;
-    }
+    status = FRAM_SPI_RECEIVE(dev, data, size);
 
-    HAL_GPIO_WritePin(dev->cs_port, dev->cs_pin, SET);
-
+end:
+    FRAM_CS_PIN_WRITE(dev, FRAM_PIN_SET);
     return status;
 }
 
 
 /* Test the FRAM is working by writing and then reading back a byte */
-fram_status_t FRAM_Test(fram_handle_t *dev, uint16_t addr, uint8_t data) {
+fram_status_t fram_test(fram_handle_t *dev, uint16_t addr, uint8_t data) {
 
     fram_status_t status = FRAM_OK;
     uint8_t       reg_data;
 
     /* Write the test data */
-    status = FRAM_Write(dev, addr, &data, 1);
+    status = fram_write(dev, addr, &data, 1);
     if (status != FRAM_OK) return status;
 
     /* Read the test data */
-    status = FRAM_Read(dev, addr, &reg_data, 1);
+    status = fram_read(dev, addr, &reg_data, 1);
     if (status != FRAM_OK) return status;
 
     /* Check the test data */
     if (reg_data != data) {
         status = FRAM_IO_ERROR;
-        LOG_ERROR("FRAM_Test failed\n");
+        LOG_ERROR("fram_test failed\n");
         return status;
     }
 
     return status;
 }
 
-
-/* ---------------------------------------------------------------------------- */
-/* HAL Functions */
-/* ---------------------------------------------------------------------------- */
-
-
-static fram_status_t spi_transmit(fram_handle_t *dev, const uint8_t *data, uint16_t size) {
-
-    fram_status_t status     = FRAM_OK;
-    hal_status_t  hal_status = HAL_OK;
-
-    hal_status = HAL_SPI_Transmit(dev->hspi, data, size, FRAM_DEFAULT_TIMEOUT);
-
-    if (hal_status != HAL_OK) {
-        LOG_ERROR("FRAM HAL_SPI_Transmit Error, code = %d\n", hal_status);
-        status = FRAM_IO_ERROR;
-    }
-
-    return status;
-}
-
-
-static fram_status_t spi_receive(fram_handle_t *dev, uint8_t *data, uint16_t size) {
-
-    fram_status_t status     = FRAM_OK;
-    hal_status_t  hal_status = HAL_OK;
-
-    hal_status = HAL_SPI_Receive(dev->hspi, data, size, FRAM_DEFAULT_TIMEOUT);
-
-    if (hal_status != HAL_OK) {
-        LOG_ERROR("FRAM HAL_SPI_Receive Error, code = %d\n", hal_status);
-        status = FRAM_IO_ERROR;
-    }
-
-    return status;
-}

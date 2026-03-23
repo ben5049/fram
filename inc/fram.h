@@ -10,7 +10,7 @@
 
 
 #include "stdbool.h"
-#include "hal.h"
+#include "stint.h"
 
 
 #define FRAM_TPU                      (1)    /* Must wait 1ms after power up to access */
@@ -58,41 +58,41 @@ typedef enum {
     FRAM_PROTECT_UPPER_QUARTER,
 } fram_block_protect_t;
 
+typedef enum {
+    FRAM_PIN_RESET,
+    FRAM_PIN_SET
+} fram_pinstate_t;
+
+typedef fram_status_t (*fram_callback_spi_transmit_t)(const uint32_t *data, uint16_t size, void *context);
+typedef fram_status_t (*fram_callback_spi_receive_t)(uint32_t *data, uint16_t size, void *context);
+typedef void (*fram_callback_write_pin_t)(fram_pinstate_t state);
+
 typedef struct {
-    bool           configured;
-    fram_variant_t variant;
+    fram_callback_spi_transmit_t callback_spi_transmit;   /* Write data via SPI */
+    fram_callback_spi_receive_t  callback_spi_receive;    /* Read data via SPI */
+    fram_callback_write_pin_t    callback_write_cs_pin;   /* Write to the cs GPIO pin */
+    fram_callback_write_pin_t    callback_write_wp_pin;   /* Write to the write-protect GPIO pin */
+    fram_callback_write_pin_t    callback_write_hold_pin; /* Write to the hold GPIO pin */
+} fram_callbacks_t;
 
-    fram_block_protect_t block_protect;
-
-    SPI_HandleTypeDef *hspi;
-    GPIO_TypeDef      *cs_port;
-    uint16_t           cs_pin;
-    GPIO_TypeDef      *hold_port;
-    uint16_t           hold_pin;
-    GPIO_TypeDef      *wp_port;
-    uint16_t           wp_pin;
+typedef struct {
+    const fram_callbacks_t *callbacks;
+    void *                  callback_context;
+    bool                    configured;
+    fram_variant_t          variant;
+    fram_block_protect_t    block_protect;
 } fram_handle_t;
 
 
-fram_status_t FRAM_Init(
-    fram_handle_t     *dev,
-    fram_variant_t     variant,
-    SPI_HandleTypeDef *hspi,
-    GPIO_TypeDef      *cs_port,
-    uint16_t           cs_pin,
-    GPIO_TypeDef      *hold_port,
-    uint16_t           hold_pin,
-    GPIO_TypeDef      *wp_port,
-    uint16_t           wp_pin);
+fram_status_t fram_init(fram_handle_t *dev,fram_variant_t variant, fram_callbacks_t callbacks, void *callback_context);
 
-fram_status_t FRAM_SetBlockProtection(fram_handle_t *dev, fram_block_protect_t protect);
+fram_status_t fram_write(fram_handle_t *dev, uint16_t addr, const uint8_t *data, uint16_t size);
+fram_status_t fram_read(fram_handle_t *dev, uint16_t addr, uint8_t *data, uint16_t size);
+fram_status_t fram_test(fram_handle_t *dev, uint16_t addr, uint8_t data);
 
-fram_status_t FRAM_Write(fram_handle_t *dev, uint16_t addr, const uint8_t *data, uint16_t size);
-fram_status_t FRAM_Read(fram_handle_t *dev, uint16_t addr, uint8_t *data, uint16_t size);
-fram_status_t FRAM_Test(fram_handle_t *dev, uint16_t addr, uint8_t data);
-
-fram_status_t FRAM_EnableWP(fram_handle_t *dev);
-fram_status_t FRAM_DisableWP(fram_handle_t *dev);
+fram_status_t fram_enable_wp(fram_handle_t *dev);
+fram_status_t fram_disable_wp(fram_handle_t *dev);
+fram_status_t fram_set_block_protection(fram_handle_t *dev, fram_block_protect_t protect);
 
 
 #endif /* INC_FRAM_MAIN_H_ */
