@@ -66,6 +66,7 @@ typedef enum {
 typedef fram_status_t (*fram_callback_spi_transmit_t)(const uint32_t *data, uint16_t size, void *context);
 typedef fram_status_t (*fram_callback_spi_receive_t)(uint32_t *data, uint16_t size, void *context);
 typedef void (*fram_callback_write_pin_t)(fram_pinstate_t state);
+typedef void (*fram_callback_write_log_t)(void* context, const char *format, ...);
 
 typedef struct {
     fram_callback_spi_transmit_t callback_spi_transmit;   /* Write data via SPI */
@@ -73,6 +74,8 @@ typedef struct {
     fram_callback_write_pin_t    callback_write_cs_pin;   /* Write to the cs GPIO pin */
     fram_callback_write_pin_t    callback_write_wp_pin;   /* Write to the write-protect GPIO pin */
     fram_callback_write_pin_t    callback_write_hold_pin; /* Write to the hold GPIO pin */
+    fram_callback_write_log_t    callback_log_info;       /* Write a log info message */
+    fram_callback_write_log_t    callback_log_error;      /* Write a log error message */
 } fram_callbacks_t;
 
 typedef struct {

@@ -6,16 +6,16 @@
  */
 
 #include "stdint.h"
-
 #include "fram.h"
-#include "log_tools.h"
 
 
-#define FRAM_SPI_TRANSMIT(h, d, s)    ((h)->callbacks->callback_spi_transmit(d, s, (h)->callback_context))
-#define FRAM_SPI_RECEIVE(h, d, s)     ((h)->callbacks->callback_spi_receive(d, s, (h)->callback_context))
-#define FRAM_CS_PIN_WRITE(h, s)   ((h)->callbacks->callback_write_cs_pin((s)))
-#define FRAM_WP_PIN_WRITE(h, s)   ((h)->callbacks->callback_write_wp_pin((s)))
-#define FRAM_HOLD_PIN_WRITE(h, s) ((h)->callbacks->callback_write_hold_pin((s)))
+#define FRAM_SPI_TRANSMIT(h, d, s) ((h)->callbacks->callback_spi_transmit(d, s, (h)->callback_context))
+#define FRAM_SPI_RECEIVE(h, d, s)  ((h)->callbacks->callback_spi_receive(d, s, (h)->callback_context))
+#define FRAM_CS_PIN_WRITE(h, s)    ((h)->callbacks->callback_write_cs_pin((s)))
+#define FRAM_WP_PIN_WRITE(h, s)    ((h)->callbacks->callback_write_wp_pin((s)))
+#define FRAM_HOLD_PIN_WRITE(h, s)  ((h)->callbacks->callback_write_hold_pin((s)))
+#define FRAM_LOG_INFO(h, f, ...)   ((h)->callbacks->callback_log_info((f), ##__VA_ARGS__))
+#define FRAM_LOG_ERROR(h, f, ...)  ((h)->callbacks->callback_log_error((f), ##__VA_ARGS__))
 
 
 /* Private function prototypes */
@@ -54,6 +54,8 @@ fram_status_t fram_init(fram_handle_t *dev, fram_variant_t variant, const fram_c
 
     /* Update the device struct */
     dev->configured = true;
+
+    FRAM_LOG_INFO(dev, "FRAM Initialised");
 
     return status;
 }
@@ -130,7 +132,6 @@ static fram_status_t fram_write_sr(fram_handle_t *dev, uint8_t sr) {
         return status;
     }
 
-
     FRAM_CS_PIN_WRITE(dev, FRAM_PIN_SET);
     FRAM_WP_PIN_WRITE(dev, FRAM_PIN_RESET);
 
@@ -141,7 +142,7 @@ static fram_status_t fram_write_sr(fram_handle_t *dev, uint8_t sr) {
     /* Check the write was successful */
     if (reg_data != sr) {
         status = FRAM_IO_ERROR;
-        LOG_ERROR("FRAM failed to write SR\n");
+        FRAM_LOG_ERROR("FRAM failed to write SR\n");
         return status;
     }
 
@@ -226,7 +227,7 @@ fram_status_t fram_set_block_protection(fram_handle_t *dev, fram_block_protect_t
 
         default:
             status = FRAM_PARAMETER_ERROR;
-            LOG_ERROR("FRAM invalid block protection setting\n");
+            FRAM_LOG_ERROR("FRAM invalid block protection setting\n");
             break;
     }
     if (status != FRAM_OK) return status;
@@ -312,10 +313,9 @@ fram_status_t fram_test(fram_handle_t *dev, uint16_t addr, uint8_t data) {
     /* Check the test data */
     if (reg_data != data) {
         status = FRAM_IO_ERROR;
-        LOG_ERROR("fram_test failed\n");
+        FRAM_LOG_ERROR("fram_test failed\n");
         return status;
     }
 
     return status;
 }
-
