@@ -10,7 +10,7 @@
 
 
 #include "stdbool.h"
-#include "stint.h"
+#include "stdint.h"
 
 
 #define FRAM_TPU                      (1)    /* Must wait 1ms after power up to access */
@@ -38,13 +38,13 @@
 
 
 typedef enum {
-    FRAM_OK      = HAL_OK,
-    FRAM_ERROR   = HAL_ERROR,
-    FRAM_BUSY    = HAL_BUSY,
-    FRAM_TIMEOUT = HAL_TIMEOUT,
+    FRAM_OK,
+    FRAM_ERROR,
+    FRAM_BUSY,
+    FRAM_TIMEOUT,
     FRAM_NOT_IMPLEMENTED_ERROR,
     FRAM_PARAMETER_ERROR,
-    FRAM_IO_ERROR, /* Written data != read data */
+    FRAM_IO_ERROR /* Written data != read data */
 } fram_status_t;
 
 typedef enum {
@@ -63,10 +63,10 @@ typedef enum {
     FRAM_PIN_SET
 } fram_pinstate_t;
 
-typedef fram_status_t (*fram_callback_spi_transmit_t)(const uint32_t *data, uint16_t size, void *context);
-typedef fram_status_t (*fram_callback_spi_receive_t)(uint32_t *data, uint16_t size, void *context);
+typedef fram_status_t (*fram_callback_spi_transmit_t)(const uint8_t *data, uint16_t size, void *context);
+typedef fram_status_t (*fram_callback_spi_receive_t)(uint8_t *data, uint16_t size, void *context);
 typedef void (*fram_callback_write_pin_t)(fram_pinstate_t state);
-typedef void (*fram_callback_write_log_t)(void* context, const char *format, ...);
+typedef void (*fram_callback_write_log_t)(void *context, const char *format, ...);
 
 typedef struct {
     fram_callback_spi_transmit_t callback_spi_transmit;   /* Write data via SPI */
@@ -80,14 +80,14 @@ typedef struct {
 
 typedef struct {
     const fram_callbacks_t *callbacks;
-    void *                  callback_context;
+    void                   *callback_context;
     bool                    configured;
     fram_variant_t          variant;
     fram_block_protect_t    block_protect;
 } fram_handle_t;
 
 
-fram_status_t fram_init(fram_handle_t *dev,fram_variant_t variant, fram_callbacks_t callbacks, void *callback_context);
+fram_status_t fram_init(fram_handle_t *dev, fram_variant_t variant, const fram_callbacks_t *callbacks, void *callback_context);
 
 fram_status_t fram_write(fram_handle_t *dev, uint16_t addr, const uint8_t *data, uint16_t size);
 fram_status_t fram_read(fram_handle_t *dev, uint16_t addr, uint8_t *data, uint16_t size);
