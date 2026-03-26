@@ -11,9 +11,9 @@
 
 #define FRAM_SPI_TRANSMIT(h, d, s) ((h)->callbacks->callback_spi_transmit(d, s, (h)->callback_context))
 #define FRAM_SPI_RECEIVE(h, d, s)  ((h)->callbacks->callback_spi_receive(d, s, (h)->callback_context))
-#define FRAM_CS_PIN_WRITE(h, s)    ((h)->callbacks->callback_write_cs_pin((s)))
-#define FRAM_WP_PIN_WRITE(h, s)    ((h)->callbacks->callback_write_wp_pin((s)))
-#define FRAM_HOLD_PIN_WRITE(h, s)  ((h)->callbacks->callback_write_hold_pin((s)))
+#define FRAM_CS_PIN_WRITE(h, s)    ((h)->callbacks->callback_write_cs_pin((s), (h)->callback_context))
+#define FRAM_WP_PIN_WRITE(h, s)    ((h)->callbacks->callback_write_wp_pin((s), (h)->callback_context))
+#define FRAM_HOLD_PIN_WRITE(h, s)  ((h)->callbacks->callback_write_hold_pin((s), (h)->callback_context))
 #define FRAM_LOG_INFO(h, f, ...)   ((h)->callbacks->callback_log_info((h)->callback_context, (f), ##__VA_ARGS__))
 #define FRAM_LOG_ERROR(h, f, ...)  ((h)->callbacks->callback_log_error((h)->callback_context, (f), ##__VA_ARGS__))
 

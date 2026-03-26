@@ -65,7 +65,7 @@ typedef enum {
 
 typedef fram_status_t (*fram_callback_spi_transmit_t)(const uint8_t *data, uint16_t size, void *context);
 typedef fram_status_t (*fram_callback_spi_receive_t)(uint8_t *data, uint16_t size, void *context);
-typedef void (*fram_callback_write_pin_t)(fram_pinstate_t state);
+typedef void (*fram_callback_write_pin_t)(fram_pinstate_t state, void *context);
 typedef void (*fram_callback_write_log_t)(void *context, const char *format, ...);
 
 typedef struct {
