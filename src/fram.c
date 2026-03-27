@@ -97,7 +97,7 @@ static fram_status_t fram_read_sr(fram_handle_t *dev, uint8_t *sr) {
     status = FRAM_SPI_TRANSMIT(dev, &opcode, 1);
     if (status != FRAM_OK) goto end;
 
-    status = FRAM_SPI_TRANSMIT(dev, sr, 1);
+    status = FRAM_SPI_RECEIVE(dev, sr, 1);
     if (status != FRAM_OK) goto end;
 
 end:
@@ -259,7 +259,7 @@ fram_status_t fram_write(fram_handle_t *dev, uint16_t addr, const uint8_t *data,
 
     /* Send the address */
     addr   &= 0x1fff; /* 13-bit address */
-    status  = FRAM_SPI_TRANSMIT(dev, (uint8_t *) (&addr), 2);
+    status  = FRAM_SPI_TRANSMIT(dev, (uint8_t *) &addr, 2);
     if (status != FRAM_OK) goto end;
 
     /* Send the data */
