@@ -6,6 +6,8 @@
  */
 
 #include "stdint.h"
+#include "stddef.h"
+
 #include "fram.h"
 
 
@@ -29,11 +31,21 @@ fram_status_t fram_init(fram_handle_t *dev, fram_variant_t variant, const fram_c
 
     fram_status_t status = FRAM_OK;
 
+    /* Check the callbacks */
+    if (callbacks->callback_spi_transmit == NULL) status = FRAM_PARAMETER_ERROR;
+    if (callbacks->callback_spi_receive == NULL) status = FRAM_PARAMETER_ERROR;
+    if (callbacks->callback_write_cs_pin == NULL) status = FRAM_PARAMETER_ERROR;
+    if (callbacks->callback_write_wp_pin == NULL) status = FRAM_PARAMETER_ERROR;
+    if (callbacks->callback_write_hold_pin == NULL) status = FRAM_PARAMETER_ERROR;
+    if (callbacks->callback_log_info == NULL) status = FRAM_PARAMETER_ERROR;
+    if (callbacks->callback_log_error == NULL) status = FRAM_PARAMETER_ERROR;
+    if (status != FRAM_OK) return status;
+
     dev->configured       = false;
     dev->variant          = variant;
+    dev->block_protect    = FRAM_PROTECT_ALL; /* Default is protect all blocks */
     dev->callbacks        = callbacks;
     dev->callback_context = callback_context;
-    dev->block_protect    = FRAM_PROTECT_ALL; /* Default is protect all blocks */
 
     /* Set pins to default state */
     FRAM_CS_PIN_WRITE(dev, FRAM_PIN_SET);
@@ -67,7 +79,7 @@ static fram_status_t fram_write_enable(fram_handle_t *dev) {
     uint8_t       opcode = FRAM_OPCODE_WREN;
 
     FRAM_CS_PIN_WRITE(dev, FRAM_PIN_RESET);
-    status = FRAM_SPI_TRANSMIT(dev, &opcode, 1);
+    status = FRAM_SPI_TRANSMIT(dev, &opcode, sizeof(opcode));
     FRAM_CS_PIN_WRITE(dev, FRAM_PIN_SET);
 
     return status;
@@ -80,7 +92,7 @@ static fram_status_t fram_write_disable(fram_handle_t *dev) {
     uint8_t       opcode = FRAM_OPCODE_WRDI;
 
     FRAM_CS_PIN_WRITE(dev, FRAM_PIN_RESET);
-    status = FRAM_SPI_TRANSMIT(dev, &opcode, 1);
+    status = FRAM_SPI_TRANSMIT(dev, &opcode, sizeof(opcode));
     FRAM_CS_PIN_WRITE(dev, FRAM_PIN_SET);
 
     return status;
@@ -94,10 +106,10 @@ static fram_status_t fram_read_sr(fram_handle_t *dev, uint8_t *sr) {
 
     FRAM_CS_PIN_WRITE(dev, FRAM_PIN_RESET);
 
-    status = FRAM_SPI_TRANSMIT(dev, &opcode, 1);
+    status = FRAM_SPI_TRANSMIT(dev, &opcode, sizeof(opcode));
     if (status != FRAM_OK) goto end;
 
-    status = FRAM_SPI_RECEIVE(dev, sr, 1);
+    status = FRAM_SPI_RECEIVE(dev, sr, sizeof(*sr));
     if (status != FRAM_OK) goto end;
 
 end:
@@ -118,14 +130,14 @@ static fram_status_t fram_write_sr(fram_handle_t *dev, uint8_t sr) {
     FRAM_WP_PIN_WRITE(dev, FRAM_PIN_SET);
     FRAM_CS_PIN_WRITE(dev, FRAM_PIN_RESET);
 
-    status = FRAM_SPI_TRANSMIT(dev, &opcode, 1);
+    status = FRAM_SPI_TRANSMIT(dev, &opcode, sizeof(opcode));
     if (status != FRAM_OK) {
         FRAM_CS_PIN_WRITE(dev, FRAM_PIN_SET);
         FRAM_WP_PIN_WRITE(dev, FRAM_PIN_RESET);
         return status;
     }
 
-    status = FRAM_SPI_TRANSMIT(dev, &sr, 1);
+    status = FRAM_SPI_TRANSMIT(dev, &sr, sizeof(sr));
     if (status != FRAM_OK) {
         FRAM_CS_PIN_WRITE(dev, FRAM_PIN_SET);
         FRAM_WP_PIN_WRITE(dev, FRAM_PIN_RESET);
@@ -142,7 +154,7 @@ static fram_status_t fram_write_sr(fram_handle_t *dev, uint8_t sr) {
     /* Check the write was successful */
     if (reg_data != sr) {
         status = FRAM_IO_ERROR;
-        FRAM_LOG_ERROR(dev, "FRAM failed to write SR\n");
+        FRAM_LOG_ERROR(dev, "FRAM failed to write SR");
         return status;
     }
 
@@ -227,7 +239,7 @@ fram_status_t fram_set_block_protection(fram_handle_t *dev, fram_block_protect_t
 
         default:
             status = FRAM_PARAMETER_ERROR;
-            FRAM_LOG_ERROR(dev, "FRAM invalid block protection setting\n");
+            FRAM_LOG_ERROR(dev, "FRAM invalid block protection setting");
             break;
     }
     if (status != FRAM_OK) return status;
@@ -247,6 +259,7 @@ fram_status_t fram_write(fram_handle_t *dev, uint16_t addr, const uint8_t *data,
 
     fram_status_t status = FRAM_OK;
     uint8_t       opcode = FRAM_OPCODE_WRITE;
+    uint8_t       addr_bytes[sizeof(addr)];
 
     status = fram_write_enable(dev);
     if (status != FRAM_OK) return status;
@@ -254,12 +267,13 @@ fram_status_t fram_write(fram_handle_t *dev, uint16_t addr, const uint8_t *data,
     FRAM_CS_PIN_WRITE(dev, FRAM_PIN_RESET);
 
     /* Send the opcode */
-    status = FRAM_SPI_TRANSMIT(dev, &opcode, 1);
+    status = FRAM_SPI_TRANSMIT(dev, &opcode, sizeof(opcode));
     if (status != FRAM_OK) goto end;
 
     /* Send the address */
-    addr   &= 0x1fff; /* 13-bit address */
-    status  = FRAM_SPI_TRANSMIT(dev, (uint8_t *) &addr, 2);
+    addr_bytes[0] = (uint8_t)((addr >> 8) & 0x1f); /* 13-bit address */
+    addr_bytes[1] = (uint8_t)(addr & 0xff);
+    status  = FRAM_SPI_TRANSMIT(dev, addr_bytes, sizeof(addr_bytes));
     if (status != FRAM_OK) goto end;
 
     /* Send the data */
@@ -275,16 +289,18 @@ fram_status_t fram_read(fram_handle_t *dev, uint16_t addr, uint8_t *data, uint16
 
     fram_status_t status = FRAM_OK;
     uint8_t       opcode = FRAM_OPCODE_READ;
+    uint8_t       addr_bytes[sizeof(addr)];
 
     FRAM_CS_PIN_WRITE(dev, FRAM_PIN_RESET);
 
     /* Send the opcode */
-    status = FRAM_SPI_TRANSMIT(dev, &opcode, 1);
+    status = FRAM_SPI_TRANSMIT(dev, &opcode, sizeof(opcode));
     if (status != FRAM_OK) goto end;
 
     /* Send the address */
-    addr   &= 0x1fff; /* 13-bit address */
-    status  = FRAM_SPI_TRANSMIT(dev, (uint8_t *) (&addr), 2);
+    addr_bytes[0] = (uint8_t)((addr >> 8) & 0x1f); /* 13-bit address */
+    addr_bytes[1] = (uint8_t)(addr & 0xff);
+    status  = FRAM_SPI_TRANSMIT(dev, addr_bytes, sizeof(addr_bytes));
     if (status != FRAM_OK) goto end;
 
     /* Read the data */
@@ -303,17 +319,17 @@ fram_status_t fram_test(fram_handle_t *dev, uint16_t addr, uint8_t data) {
     uint8_t       reg_data;
 
     /* Write the test data */
-    status = fram_write(dev, addr, &data, 1);
+    status = fram_write(dev, addr, &data, sizeof(data));
     if (status != FRAM_OK) return status;
 
     /* Read the test data */
-    status = fram_read(dev, addr, &reg_data, 1);
+    status = fram_read(dev, addr, &reg_data, sizeof(data));
     if (status != FRAM_OK) return status;
 
     /* Check the test data */
     if (reg_data != data) {
         status = FRAM_IO_ERROR;
-        FRAM_LOG_ERROR(dev, "fram_test failed\n");
+        FRAM_LOG_ERROR(dev, "fram_test failed");
         return status;
     }
 

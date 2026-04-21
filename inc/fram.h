@@ -8,6 +8,10 @@
 #ifndef INC_FRAM_MAIN_H_
 #define INC_FRAM_MAIN_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 
 #include "stdbool.h"
 #include "stdint.h"
@@ -97,5 +101,9 @@ fram_status_t fram_enable_wp(fram_handle_t *dev);
 fram_status_t fram_disable_wp(fram_handle_t *dev);
 fram_status_t fram_set_block_protection(fram_handle_t *dev, fram_block_protect_t protect);
 
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* INC_FRAM_MAIN_H_ */
